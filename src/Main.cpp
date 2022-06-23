@@ -42,7 +42,7 @@ void run_dramtrace(const Config& configs, Memory<T, Controller>& memory, const c
 
     /* run simulation */
     bool stall = false, end = false;
-    int reads = 0, writes = 0, clks = 0;
+    int reads = 0, writes = 0, rngs = 0, clks = 0; //seungwoo: add rngs
     long addr = 0;
     Request::Type type = Request::Type::READ;
     map<int, int> latencies;
@@ -62,6 +62,7 @@ void run_dramtrace(const Config& configs, Memory<T, Controller>& memory, const c
             if (!stall){
                 if (type == Request::Type::READ) reads++;
                 else if (type == Request::Type::WRITE) writes++;
+                else if (type == Request::Type::RNG) rngs++; //seungwoo: add rngs
             }
         }
         else {
@@ -72,6 +73,7 @@ void run_dramtrace(const Config& configs, Memory<T, Controller>& memory, const c
         memory.tick();
         clks ++;
         Stats::curTick++; // memory clock, global, for Statistics
+std::cout<<"clk:"<<clks<<" pending_requests:"<<memory.pending_requests()<<std::endl;
     }
     // This a workaround for statistics set only initially lost in the end
     memory.finish();

@@ -8,6 +8,8 @@
 #include <list>
 #include <string>
 #include <vector>
+#include <cstdlib> //seungwoo
+#include <queue> //seungwoo
 
 #include "Config.h"
 #include "DRAM.h"
@@ -19,6 +21,7 @@
 #include "ALDRAM.h"
 #include "SALP.h"
 #include "TLDRAM.h"
+#include "DDR3.h" //seungwoo
 
 using namespace std;
 
@@ -66,6 +69,17 @@ protected:
 #endif
 
 public:
+    
+    bool RNG_mode = false; //seungwoo: identifier for RNG mode
+    typedef int RN; //seungwoo
+    queue<RN> RNB; //seungwoo: create a Random Number Buffer as a queue.
+    //seungwoo: initialize idleness predictor
+    long last_acc_addr;
+    int idle_period_len = 0;
+    int idle_period_len_buff;
+    bool idle_period_end = false;
+    map<long, int> idle_pred_table;
+
     /* Member Variables */
     long clk = 0;
     DRAM<T>* channel;
@@ -83,6 +97,7 @@ public:
 
     Queue readq;  // queue for read requests
     Queue writeq;  // queue for write requests
+    Queue rngq; //seungwoo: add queue for RNG requests
     Queue actq; // read and write requests for which activate was issued are moved to 
                    // actq, which has higher priority than readq and writeq.
                    // This is an optimization
@@ -91,6 +106,7 @@ public:
     Queue otherq;  // queue for all "other" requests (e.g., refresh)
 
     deque<Request> pending;  // read requests that are about to receive data from DRAM
+    deque<Request> rng_pending; //seungwoo
     bool write_mode = false;  // whether write requests should be prioritized over reads
     float wr_high_watermark = 0.8f; // threshold for switching to write mode
     float wr_low_watermark = 0.2f; // threshold for switching back to read mode
@@ -306,6 +322,7 @@ public:
         switch (int(type)) {
             case int(Request::Type::READ): return readq;
             case int(Request::Type::WRITE): return writeq;
+            case int(Request::Type::RNG): return rngq; //seungwoo
             default: return otherq;
         }
     }
@@ -326,21 +343,34 @@ public:
             pending.push_back(req);
             readq.q.pop_back();
         }
+        //seungwoo: when RNG request, first check the Random Number Buffer
+        //If not empty, serve right away.
+        //If empty, enqueue in RNG queue.
+        if(req.type == Request::Type::RNG && !RNB.empty()/* && !RNG_mode*/){
+            req.depart = clk + 1;
+            pending.push_back(req);
+            RNB.pop();
+            rngq.q.pop_back();
+        }
         return true;
     }
 
     void tick()
     {
         clk++;
+std::cout<<std::endl<<"clk: "<<clk<<std::endl;
         req_queue_length_sum += readq.size() + writeq.size() + pending.size();
         read_req_queue_length_sum += readq.size() + pending.size();
         write_req_queue_length_sum += writeq.size();
 
         /*** 1. Serve completed reads ***/
         if (pending.size()) {
+std::cout<<"0"<<std::endl;
             Request& req = pending[0];
             if (req.depart <= clk) {
+std::cout<<"0.1"<<std::endl;
                 if (req.depart - req.arrive > 1) { // this request really accessed a row
+std::cout<<"0.2"<<std::endl;
                   read_latency_sum += req.depart - req.arrive;
                   channel->update_serving_requests(
                       req.addr_vec.data(), -1, clk);
@@ -355,14 +385,20 @@ public:
 
         /*** 3. Should we schedule writes? ***/
         if (!write_mode) {
+std::cout<<"0.5"<<std::endl;
             // yes -- write queue is almost full or read queue is empty
-            if (writeq.size() > int(wr_high_watermark * writeq.max) || readq.size() == 0)
+            if (writeq.size() > int(wr_high_watermark * writeq.max) || readq.size() == 0){
+std::cout<<"0.6"<<std::endl;
                 write_mode = true;
+            }
         }
         else {
+std::cout<<"0.7"<<std::endl;
             // no -- write queue is almost empty and read queue is not empty
-            if (writeq.size() < int(wr_low_watermark * writeq.max) && readq.size() != 0)
+            if (writeq.size() < int(wr_low_watermark * writeq.max) && readq.size() != 0){
+std::cout<<"0.8"<<std::endl;
                 write_mode = false;
+            }
         }
 
         /*** 4. Find the best command to schedule, if any ***/
@@ -374,46 +410,60 @@ public:
         auto req = scheduler->get_head(queue->q);
 
         bool is_valid_req = (req != queue->q.end());
+std::cout<<"1"<<std::endl;
 
         if(is_valid_req) {
+std::cout<<"1.5"<<std::endl;
             cmd = get_first_cmd(req);
             is_valid_req = is_ready(cmd, req->addr_vec);
         }
+std::cout<<"2"<<std::endl;
 
         if (!is_valid_req) {
+std::cout<<"2.5"<<std::endl;
             queue = !write_mode ? &readq : &writeq;
 
             if (otherq.size())
+            {
+std::cout<<"2.7"<<std::endl;
                 queue = &otherq;  // "other" requests are rare, so we give them precedence over reads/writes
-
+            }
             req = scheduler->get_head(queue->q);
 
             is_valid_req = (req != queue->q.end());
 
             if(is_valid_req){
+std::cout<<"2.8"<<std::endl;
                 cmd = get_first_cmd(req);
                 is_valid_req = is_ready(cmd, req->addr_vec);
             }
         }
+std::cout<<"3"<<std::endl;
 
         if (!is_valid_req) {
+std::cout<<"3.5"<<std::endl;
             // we couldn't find a command to schedule -- let's try to be speculative
             auto cmd = T::Command::PRE;
             vector<int> victim = rowpolicy->get_victim(cmd);
             if (!victim.empty()){
+std::cout<<"3.7"<<std::endl;
                 issue_cmd(cmd, victim);
             }
             return;  // nothing more to be done this cycle
         }
+std::cout<<"4"<<std::endl;
 
         if (req->is_first_command) {
+std::cout<<"4.3"<<std::endl;
             req->is_first_command = false;
             int coreid = req->coreid;
             if (req->type == Request::Type::READ || req->type == Request::Type::WRITE) {
+std::cout<<"4.5"<<std::endl;
               channel->update_serving_requests(req->addr_vec.data(), 1, clk);
             }
             int tx = (channel->spec->prefetch_size * channel->spec->channel_width / 8);
             if (req->type == Request::Type::READ) {
+std::cout<<"4.7"<<std::endl;
                 if (is_row_hit(req)) {
                     ++read_row_hits[coreid];
                     ++row_hits;
@@ -426,6 +476,7 @@ public:
                 }
               read_transaction_bytes += tx;
             } else if (req->type == Request::Type::WRITE) {
+std::cout<<"4.8"<<std::endl;
               if (is_row_hit(req)) {
                   ++write_row_hits[coreid];
                   ++row_hits;
@@ -439,14 +490,19 @@ public:
               write_transaction_bytes += tx;
             }
         }
+std::cout<<"5"<<std::endl;
 
         // issue command on behalf of request
         issue_cmd(cmd, get_addr_vec(cmd, req));
+std::cout<<"6"<<std::endl;
 
         // check whether this is the last command (which finishes the request)
         //if (cmd != channel->spec->translate[int(req->type)]){
         if (cmd != channel->spec->translate[int(req->type)]) {
+std::cout<<"cmd: "<<channel->spec->command_name[(int)cmd]<<std::endl;
+std::cout<<"6.5"<<std::endl;
             if(channel->spec->is_opening(cmd)) {
+std::cout<<"6.7"<<std::endl;
                 // promote the request that caused issuing activation to actq
                 actq.q.push_back(*req);
                 queue->q.erase(req);
@@ -455,17 +511,21 @@ public:
             return;
         }
 
+std::cout<<"7"<<std::endl;
         // set a future completion time for read requests
         if (req->type == Request::Type::READ) {
+std::cout<<"7.5"<<std::endl;
             req->depart = clk + channel->spec->read_latency;
             pending.push_back(*req);
         }
 
+std::cout<<"8"<<std::endl;
         if (req->type == Request::Type::WRITE) {
+std::cout<<"8.5"<<std::endl;
             channel->update_serving_requests(req->addr_vec.data(), -1, clk);
             // req->callback(*req);
         }
-
+std::cout<<"9"<<std::endl;
         // remove request from queue
         queue->q.erase(req);
     }
@@ -647,6 +707,10 @@ void Controller<ALDRAM>::update_temp(ALDRAM::Temp current_temperature);
 
 template <>
 void Controller<TLDRAM>::tick();
+
+//seungwoo
+template <>
+void Controller<DDR3>::tick();
 
 template <>
 void Controller<TLDRAM>::cmd_issue_autoprecharge(typename TLDRAM::Command& cmd,

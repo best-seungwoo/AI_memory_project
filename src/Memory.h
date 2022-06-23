@@ -342,6 +342,7 @@ public:
             if (req.type == Request::Type::WRITE) {
               ++num_write_requests[coreid];
             }
+            //seungwoo: ?
             ++incoming_requests_per_channel[req.addr_vec[int(T::Level::Channel)]];
             return true;
         }
@@ -490,7 +491,9 @@ public:
     {
         int reqs = 0;
         for (auto ctrl: ctrls)
-            reqs += ctrl->readq.size() + ctrl->writeq.size() + ctrl->otherq.size() + ctrl->actq.size() + ctrl->pending.size();
+            reqs += ctrl->readq.size();/* + ctrl->writeq.size()
+            + ctrl->rngq.size() + ctrl->rng_pending.size()//seungwoo 
+            + ctrl->otherq.size() + ctrl->actq.size() + ctrl->pending.size();*/
         return reqs;
     }
 

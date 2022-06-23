@@ -77,6 +77,9 @@ public:
 
     Scheduler(Controller<T>* ctrl) : ctrl(ctrl) {}
 
+    //seungwoo
+    //list<Request>::iterator get_end(list<Request>& q)
+
     list<Request>::iterator get_head(list<Request>& q)
     {
         // TODO make the decision at compile time
@@ -304,7 +307,7 @@ public:
             match->second.timestamp = clk;
         } /* accessing */
 
-        if (spec->is_closing(cmd)) {
+        if (spec->is_closing(cmd) /*seungwoo*/ && spec->command_name[(int)cmd] != "PRER") {
           // we are closing one or more rows -- remove their entries
           int n_rm = 0;
           int scope;

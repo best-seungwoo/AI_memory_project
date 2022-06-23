@@ -3,6 +3,7 @@
 #include <vector>
 #include <functional>
 #include <cassert>
+#include <cmath> //seungwoo
 
 using namespace std;
 using namespace ramulator;
@@ -31,7 +32,9 @@ map<string, enum DDR3::Speed> DDR3::speed_map = {
 DDR3::DDR3(Org org, Speed speed) :
     org_entry(org_table[int(org)]),
     speed_entry(speed_table[int(speed)]),
-    read_latency(speed_entry.nCL + speed_entry.nBL)
+    read_latency(speed_entry.nCL + speed_entry.nBL),
+    rng_read_latency(2 * (int)ceil(speed_entry.nRCDR) + speed_entry.nRP + speed_entry.nRTP) //seungwoo
+
 {
     init_speed();
     init_prereq();
@@ -116,6 +119,15 @@ void DDR3::init_prereq()
     prereq[int(Level::Rank)][int(Command::WR)] = prereq[int(Level::Rank)][int(Command::RD)];
     prereq[int(Level::Bank)][int(Command::WR)] = prereq[int(Level::Bank)][int(Command::RD)];
 
+    // RNG: seungwoo
+    prereq[int(Level::Rank)][int(Command::RNG)] = prereq[int(Level::Rank)][int(Command::RD)];
+    prereq[int(Level::Bank)][int(Command::RNG)] = [] (DRAM<DDR3>* node, Command cmd, int id) {
+        switch (int(node->state)) {
+            case int(State::Closed): return Command::ACTR2;
+            case int(State::Opened): return Command::PRER;
+            default: assert(false);
+        }};
+
     // REF
     prereq[int(Level::Rank)][int(Command::REF)] = [] (DRAM<DDR3>* node, Command cmd, int id) {
         for (auto bank : node->children) {
@@ -184,6 +196,15 @@ void DDR3::init_lambda()
     lambda[int(Level::Bank)][int(Command::ACT)] = [] (DRAM<DDR3>* node, int id) {
         node->state = State::Opened;
         node->row_state[id] = State::Opened;};
+
+    //seungwoo: ACTR1 & ACTR2
+    lambda[int(Level::Bank)][int(Command::ACTR1)] = [] (DRAM<DDR3>* node, int id) {
+        node->state = State::Opened;
+        node->row_state[id] = State::Opened;};
+    lambda[int(Level::Bank)][int(Command::ACTR2)] = [] (DRAM<DDR3>* node, int id) {
+        node->state = State::Opened;
+        node->row_state[id] = State::Opened;};
+    
     lambda[int(Level::Bank)][int(Command::PRE)] = [] (DRAM<DDR3>* node, int id) {
         node->state = State::Closed;
         node->row_state.clear();};
@@ -191,9 +212,19 @@ void DDR3::init_lambda()
         for (auto bank : node->children) {
             bank->state = State::Closed;
             bank->row_state.clear();}};
+
+    //seungwoo: PRER
+    lambda[int(Level::Bank)][int(Command::PRER)] = [] (DRAM<DDR3>* node, int id) {
+        node->state = State::Closed;
+        node->row_state.clear();};
+
     lambda[int(Level::Rank)][int(Command::REF)] = [] (DRAM<DDR3>* node, int id) {};
     lambda[int(Level::Bank)][int(Command::RD)] = [] (DRAM<DDR3>* node, int id) {};
     lambda[int(Level::Bank)][int(Command::WR)] = [] (DRAM<DDR3>* node, int id) {};
+
+    //seungwoo: RNG
+    lambda[int(Level::Bank)][int(Command::RNG)] = [] (DRAM<DDR3>* node, int id) {};
+
     lambda[int(Level::Bank)][int(Command::RDA)] = [] (DRAM<DDR3>* node, int id) {
         node->state = State::Closed;
         node->row_state.clear();};
@@ -346,6 +377,12 @@ void DDR3::init_timing()
     t[int(Command::ACT)].push_back({Command::RDA, 1, s.nRCD});
     t[int(Command::ACT)].push_back({Command::WR, 1, s.nRCD});
     t[int(Command::ACT)].push_back({Command::WRA, 1, s.nRCD});
+
+    //seungwoo: timing for RNG request
+    t[int(Command::ACTR1)].push_back({Command::PRER, 1, (int)ceil(s.nRCDR)});
+    t[int(Command::PRER)].push_back({Command::ACTR2, 1, s.nRP});
+    t[int(Command::ACTR2)].push_back({Command::RNG, 1, (int)ceil(s.nRCDR)});
+    t[int(Command::RNG)].push_back({Command::PRE, 1, s.nRTP});
 
     t[int(Command::RD)].push_back({Command::PRE, 1, s.nRTP});
     t[int(Command::WR)].push_back({Command::PRE, 1, s.nCWL + s.nBL + s.nWR});

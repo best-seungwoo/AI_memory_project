@@ -3,6 +3,8 @@
 
 #include <vector>
 #include <functional>
+#include <map> //seungwoo
+#include <iostream>
 
 using namespace std;
 
@@ -23,12 +25,16 @@ public:
     {
         READ,
         WRITE,
+        RNG, //seungwoo: RNG added
         REFRESH,
         POWERDOWN,
         SELFREFRESH,
         EXTENSION,
         MAX
     } type;
+
+    static const std::map<Type, string> name_type;
+    //seungwoo: for debugging
 
     long arrive = -1;
     long depart = -1;

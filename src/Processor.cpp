@@ -403,6 +403,9 @@ bool Trace::get_unfiltered_request(long& bubble_cnt, long& req_addr, Request::Ty
         req_type = Request::Type::READ;
     else if (line.substr(pos)[0] == 'W')
         req_type = Request::Type::WRITE;
+    //seungwoo: add RNG trace
+    else if (line.substr(pos)[0] == 'G')
+        req_type = Request::Type::RNG; 
     else assert(false);
     return true;
 }
@@ -468,6 +471,9 @@ bool Trace::get_dramtrace_request(long& req_addr, Request::Type& req_type)
         req_type = Request::Type::READ;
     else if (line.substr(pos)[0] == 'W')
         req_type = Request::Type::WRITE;
+    //seungwoo: add RNG request
+    else if (line.substr(pos)[0] == 'G')
+        req_type = Request::Type::RNG;
     else assert(false);
     return true;
 }
