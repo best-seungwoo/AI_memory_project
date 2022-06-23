@@ -346,7 +346,7 @@ public:
         //seungwoo: when RNG request, first check the Random Number Buffer
         //If not empty, serve right away.
         //If empty, enqueue in RNG queue.
-        if(req.type == Request::Type::RNG && !RNB.empty()/* && !RNG_mode*/){
+        if(req.type == Request::Type::RNG && !RNB.empty() && !RNG_mode){
             req.depart = clk + 1;
             pending.push_back(req);
             RNB.pop();
